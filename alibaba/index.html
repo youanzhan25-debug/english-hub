@@ -412,12 +412,12 @@ function totalKnown() {
 }
 function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms) {
   const el = $('toast');
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms || 1600);
 }
 const wrongKey = (unitId, en) => unitId + '||' + en;
 function wrongList() {
@@ -431,23 +431,49 @@ function dueWrong() {
 /* ===== 朗读 ===== */
 let voiceEN = null;
 function pickVoice() {
+  /* 优先本地英语语音；非本地语音在部分安卓上会静默失败 */
   const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-  voiceEN = vs.find(v => /en-GB/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang)) || null;
+  const en = vs.filter(v => /^en[-_]/i.test(v.lang || ''));
+  const gb = en.filter(v => /^en[-_]GB/i.test(v.lang));
+  const loc = v => v.localService !== false;
+  voiceEN = gb.filter(loc)[0] || gb[0] || en.filter(loc)[0] || en[0] || null;
 }
 if (window.speechSynthesis) {
   pickVoice();
   speechSynthesis.onvoiceschanged = pickVoice;
 }
+const TTSH = {};
+function ttsHint(kind) {
+  if (TTSH[kind]) return; TTSH[kind] = 1;
+  const m = {
+    unsupported: '这个浏览器不支持朗读，请用 Chrome / Safari / Edge 打开',
+    blocked: '浏览器拦住了朗读，先点一下页面空白处再试',
+    novoice: '手机里没有英语语音包：设置 → 语言和输入法 → 文字转语音 → 安装 English',
+    silent: '点了没出声：先看手机是否静音，再看系统「文字转语音」有没有装英语'
+  }[kind];
+  if (m) toast(m, 4200);
+}
 function speak(text) {
   if (!S.settings.tts || !window.speechSynthesis) return;
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-GB';
-    if (voiceEN) u.voice = voiceEN;
-    u.rate = 0.92;
-    speechSynthesis.speak(u);
-  } catch (e) {}
+  let u;
+  try { u = new SpeechSynthesisUtterance(text); } catch (e) { ttsHint('unsupported'); return; }
+  /* 缺 en-GB 语音时退回系统默认，避免指定到不存在的语音导致静音 */
+  u.lang = voiceEN ? voiceEN.lang : 'en-US';
+  if (voiceEN) u.voice = voiceEN;
+  u.rate = 0.92;
+  let started = false;
+  u.onstart = () => { started = true; };
+  u.onerror = ev => ttsHint((ev && ev.error) === 'not-allowed' ? 'blocked' : (voiceEN ? 'silent' : 'novoice'));
+  const fire = () => {
+    try { if (speechSynthesis.paused) speechSynthesis.resume(); } catch (e) {}
+    try { speechSynthesis.speak(u); } catch (e) { ttsHint('silent'); return; }
+    /* 安卓上可能既不报错也不发声：1.2s 无 onstart 就提示一次 */
+    setTimeout(() => { if (!started) ttsHint(voiceEN ? 'silent' : 'novoice'); }, 1200);
+  };
+  if (speechSynthesis.speaking || speechSynthesis.pending) {
+    try { speechSynthesis.cancel(); } catch (e) {}
+    setTimeout(fire, 80);
+  } else fire();
 }
 
 /* ===== 顶栏 ===== */

@@ -393,26 +393,64 @@ var VO=[];
 function loadV(){ try{ VO = speechSynthesis.getVoices()||[] }catch(e){ VO=[] } }
 loadV(); if(window.speechSynthesis){ speechSynthesis.onvoiceschanged = loadV }
 function pick(){
-  var i;
-  for(i=0;i<VO.length;i++){ if(/^en[-_]GB/i.test(VO[i].lang)) return VO[i] }
-  for(i=0;i<VO.length;i++){ if(/^en/i.test(VO[i].lang)) return VO[i] }
-  return null;
+  /* 安卓常见坑：只有非本地的 en 语音，选它会静默失败 → 优先 localService 的语音 */
+  var gb = [], en = [], i, v, loc;
+  for(i=0;i<VO.length;i++){
+    v = VO[i];
+    if(!/^en[-_]/i.test(v.lang || '')) continue;
+    if(/^en[-_]GB/i.test(v.lang)) gb.push(v); else en.push(v);
+  }
+  loc = function(v){ return v.localService !== false };
+  return gb.filter(loc)[0] || gb[0] || en.filter(loc)[0] || en[0] || null;
 }
 /* 当前这条 utterance。链式朗读要靠它判活；取消时先把回调摘掉，
    避免 cancel() 触发的 onerror 把「新开的那一句」误判成失败而停播。 */
 var WS = null;
+/* 朗读自检：安卓「点了没声」多是 无英语语音包 / 引擎未启用 / 浏览器拦截 */
+var TTSH = {};
+function ttsHint(kind){
+  if(TTSH[kind]) return; TTSH[kind] = 1;
+  var m = {
+    unsupported:'这个浏览器不支持朗读，请用 Chrome / Safari / Edge 打开',
+    blocked:'浏览器拦住了朗读，先点一下页面空白处再试',
+    novoice:'手机里没有英语语音包：设置 → 语言和输入法 → 文字转语音 → 安装 English',
+    silent:'点了没出声：先看手机是否静音，再看系统「文字转语音」有没有装英语'
+  }[kind];
+  if(m) tip(m, 4200);
+}
 function say(t, btn, cb){
-  if(!window.speechSynthesis||!t){ if(cb) cb('empty'); return }
-  try{
-    speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(t); u.lang='en-GB'; u.rate=1;
-    var v = pick(); if(v) u.voice = v;
-    WS = u;
-    u.onend = function(){ if(btn) btn.classList.remove('on'); if(WS===u) WS = null; if(cb) cb(null) };
-    u.onerror = function(){ if(btn) btn.classList.remove('on'); if(WS===u) WS = null; if(cb) cb('err') };
-    if(btn) btn.classList.add('on');
-    speechSynthesis.speak(u);
-  }catch(e){ if(btn) btn.classList.remove('on'); if(cb) cb('err') }
+  if(!window.speechSynthesis || !t){
+    if(!window.speechSynthesis) ttsHint('unsupported');
+    if(cb) cb('empty'); return;
+  }
+  var v = pick(), u;
+  try{ u = new SpeechSynthesisUtterance(t) }catch(e){ ttsHint('unsupported'); if(cb) cb('err'); return }
+  /* 没有 en-GB 语音时退回 en-US，再退系统默认；写死 en-GB 在缺该语音的安卓上会直接静音 */
+  u.lang = v ? v.lang : 'en-US';
+  u.rate = 1;
+  if(v) u.voice = v;
+  var started = false, closed = false;
+  function close(kind){ if(closed) return; closed = true; if(btn) btn.classList.remove('on'); if(WS === u) WS = null; if(cb) cb(kind) }
+  u.onstart = function(){ started = true };
+  u.onend = function(){ close(null) };
+  u.onerror = function(ev){
+    var err = ev && ev.error;
+    ttsHint(err === 'not-allowed' ? 'blocked' : (VO.length ? 'silent' : 'novoice'));
+    close('err');
+  };
+  WS = u;
+  if(btn) btn.classList.add('on');
+  function fire(){
+    try{ if(speechSynthesis.paused) speechSynthesis.resume() }catch(e){}
+    try{ speechSynthesis.speak(u) }catch(e){ ttsHint('silent'); close('err'); return }
+    /* 安卓上 speak() 可能既不报错也不发声：1.2s 内没有 onstart 就提示一次 */
+    setTimeout(function(){ if(!started && !closed) ttsHint(VO.length ? 'silent' : 'novoice') }, 1200);
+  }
+  if(speechSynthesis.speaking || speechSynthesis.pending){
+    /* 安卓上 cancel() 紧跟 speak() 会吞掉新句子，隔一拍再发 */
+    try{ speechSynthesis.cancel() }catch(e){}
+    setTimeout(fire, 80);
+  } else fire();
 }
 
 /* ── 我的生词 / 已过 / 闪卡位 ── */
@@ -1296,12 +1334,12 @@ function boot(){
 function LSX(){ return {wrong:'p2t_wrong_v1', mas:'p2t_mas_v1', seen:'p2t_seen_v1', days:'p2t_days_v1'} }
 function shotCfg(){ return {max:25, px:1000, kb:100} }
 
-function tip(msg){
+function tip(msg, ms){
   var el = $('#p2tip');
   if(!el){ el = document.createElement('div'); el.id = 'p2tip'; el.className = 'toast'; document.body.appendChild(el) }
   el.textContent = msg; el.classList.add('on');
   if(tip._t) clearTimeout(tip._t);
-  tip._t = setTimeout(function(){ el.classList.remove('on') }, 2200);
+  tip._t = setTimeout(function(){ el.classList.remove('on') }, ms || 2200);
 }
 function marr(k){ var a = jget(k, []); return (a && a.length !== undefined) ? a : [] }
 /* 存照片要能分辨"存不下"：store() 会吞掉异常，这里自己写严格版 */
