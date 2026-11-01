@@ -59,7 +59,7 @@
 
   .bar{height:6px;border-radius:999px;background:#ece7db;overflow:hidden}
   .bar i{display:block;height:100%;width:0;border-radius:999px;background:var(--accent,var(--ink));transition:width .5s ease}
-  .stat{display:flex;justify-content:space-between;align-items:baseline;margin:7px 0 0;font-size:12px;color:var(--mut)}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:7px 0 0;padding-right:62px;font-size:12px;color:var(--mut)}
   .stat b{color:var(--accent,var(--ink));font-weight:700;font-variant-numeric:tabular-nums}
   .go{
     position:absolute;right:14px;bottom:13px;font-size:12px;color:var(--accent,var(--ink));
@@ -165,14 +165,15 @@ function render(){
 
     const p = pct(info.done, info.total);
     const num = String(i + 1).padStart(2, '0');
-    const label = p ? (p + '%') : '未开始';
+    const label = info.done > 0 ? (p ? (p + '%') : '不足 1%') : '未开始';
+    const barW = info.done > 0 ? Math.max(2, p) : 0;
     return ''
       + '<a class="deck" href="' + d.href + '" style="--accent:' + d.accent + '">'
       +   '<div class="top"><span class="tag">' + esc(d.tag) + '</span><span class="no">' + num + '</span></div>'
       +   '<p class="name">' + esc(d.name) + '</p>'
       +   '<p class="sub">' + esc(d.sub) + '</p>'
       +   '<p class="meta">' + esc(d.meta) + '</p>'
-      +   '<div class="bar"><i style="width:' + p + '%"></i></div>'
+      +   '<div class="bar"><i style="width:' + barW + '%"></i></div>'
       +   '<div class="stat">'
       +     '<span><b>' + esc(label) + '</b>　已掌握 ' + info.done + ' / ' + info.total + ' ' + esc(d.unit || '') + '</span>'
       +     '<span>' + esc(info.note || '') + '</span>'
